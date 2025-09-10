@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF and Excel Comparison</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        label {
+            display: block;
+            margin: 10px 0 5px;
+        }
+        input[type="file"] {
+            margin-bottom: 20px;
+        }
+        #results {
+            margin-top: 20px;
+        }
+        #results h3 {
+            margin-top: 20px;
+        }
+        #results p {
+            margin: 5px 0;
+        }
+        #differing-items {
+            color: red;
+        }
+        #matching-items {
+            color: green;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 10px 0;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+        #differing-items table {
+            border-color: #ff9999;
+        }
+        #differing-items th {
+            background-color: #ffe6e6;
+        }
+        #matching-items table {
+            border-color: #99ff99;
+        }
+        #matching-items th {
+            background-color: #e6ffe6;
+        }
+    </style>
+</head>
+<body>
+    <label for="pdf-file">Upload PDF:</label>
+    <input type="file" id="pdf-file" accept="application/pdf" />
+    <label for="excel-file">Upload Excel:</label>
+    <input type="file" id="excel-file" accept=".xlsx, .xls" />
+
+    <div>
+        <h2>Comparison Results</h2>
+        <div id="results">
+            <h3>Differing Items:</h3>
+            <div id="differing-items"></div>
+            <h3>Matching Items:</h3>
+            <div id="matching-items"></div>
+        </div>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script>
+        let pdfUploaded = false;
+    let excelUploaded = false;
+    const datas = [];
+    let json = [];
+    document.getElementById("pdf-file").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+    let textContent = "";
+    for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const text = await page.getTextContent();
+        text.items.forEach(item => textContent += item.str + " ");
+    }
+    const regex = /([0-9]){13}/g;
+    console.log(textContent.split("  ").filter(word => word.match(regex)));
+    textContent.split("  ").forEach((word, index) => {
+        if (word.match(regex)) {
+        const data = {
+            code: word,
+            name: textContent.split("  ")[index + 1] || "",
+            count: textContent.split("  ")[index + 2] || ""
+        };
+        datas.push(data);
+        }
+    });
+        console.log("PDF data:", datas);
+    pdfUploaded = true;
+        if (pdfUploaded && excelUploaded) {
+            compareDatas(json, datas);
+        }
+
+    });
+    document.getElementById("excel-file").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const data = await file.arrayBuffer();
+    const workbook = XLSX.read(data, { type: "array" });
+
+    // Get first sheet
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+
+    // Convert to JSON
+    json = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+    console.log("Excel data:", json);
+
+    const usableIndex = json.findIndex(row => row.includes("Cikk neve"));
+        json = json.slice(usableIndex + 1).filter(row => row[3]);
+    excelUploaded = true;
+    if (pdfUploaded && excelUploaded) {
+        compareDatas(json, datas);
+    }
+
+    });
+
+    function compareDatas(excelData, pdfData) {
+        const results = [];
+        excelData.forEach(excelRow => {
+            const pdfRow = pdfData.find(pdfRow => {
+                if (excelRow[3] === pdfRow.code && excelRow[4] !== pdfRow.count) {
+                return{
+                        code: excelRow[3],
+                        excelCount: excelRow[4],
+                        pdfCount: pdfRow.count
+                    };
+                }
+            });
+            if (!pdfRow) {
+                results.push({
+                    code: excelRow[3],
+                    excelCount: excelRow[4],
+                    pdfCount: 0
+                });
+            } else {
+                results.push({
+                    code: excelRow[3],
+                    excelCount: excelRow[4],
+                    pdfCount: Number(pdfRow.count)
+                });
+            }
+        });
+        console.log("Comparison results:", results);
+
+        console.log("differing items:", results.filter(item => item.excelCount !== item.pdfCount));
+
+        console.log("matching items:", results.filter(item => item.excelCount === item.pdfCount));
+
+        const differingItemsDiv = document.getElementById("differing-items");
+        const differingItems = results.filter(item => item.excelCount !== item.pdfCount);
+        differingItemsDiv.innerHTML = differingItems.length > 0 ? 
+            `<table>
+                <thead>
+                    <tr>
+                        <th>Code</th>
+                        <th>Excel Count</th>
+                        <th>PDF Count</th>
+                        <th>Difference</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${differingItems.map(item => 
+                        `<tr>
+                            <td>${item.code}</td>
+                            <td>${item.excelCount}</td>
+                            <td>${item.pdfCount}</td>
+                            <td>${item.excelCount - item.pdfCount}</td>
+                        </tr>`
+                    ).join('')}
+                </tbody>
+            </table>` : '<p>No differing items found.</p>';
+
+        const matchingItemsDiv = document.getElementById("matching-items");
+        const matchingItems = results.filter(item => item.excelCount === item.pdfCount);
+        matchingItemsDiv.innerHTML = matchingItems.length > 0 ? 
+            `<table>
+                <thead>
+                    <tr>
+                        <th>Code</th>
+                        <th>Excel Count</th>
+                        <th>PDF Count</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${matchingItems.map(item => 
+                        `<tr>
+                            <td>${item.code}</td>
+                            <td>${item.excelCount}</td>
+                            <td>${item.pdfCount}</td>
+                        </tr>`
+                    ).join('')}
+                </tbody>
+            </table>` : '<p>No matching items found.</p>';
+
+        return results;
+    }
+
+    </script>
+
+
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script>
+
+    </script>
+</body>
+</html>
+
+
